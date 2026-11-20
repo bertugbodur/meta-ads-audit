@@ -1,0 +1,11 @@
+{
+  "name": "meta-ads-audit",
+  "owner": { "name": "bertugbodur" },
+  "plugins": [
+    {
+      "name": "meta-ads-audit",
+      "source": "./",
+      "description": "Read-only Meta ad account audit with reports, recommendations and a visual HTML report."
+    }
+  ]
+}

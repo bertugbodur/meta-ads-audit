@@ -1,0 +1,878 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light">
+<title>Meta ads audit</title>
+<!--
+  meta-ads-audit · report template
+  ─────────────────────────────────
+  Single file, no external requests (no CDN, no web fonts, no analytics). Works offline.
+  The page reads the JSON inside <script id="report-data"> and draws itself with plain JavaScript.
+  Fill it by replacing the placeholder inside that script tag with the report JSON.
+  Escape "</" as "<\/" inside the JSON so the script tag cannot be closed early.
+
+  REPORT DATA SCHEMA
+  "text" below means: a string, OR an object with one string per language, e.g. {"en": "...", "tr": "..."}.
+  Numbers are plain numbers. Percent values are in percent units (1.25 means 1.25%).
+  Use null for anything that is missing; the page shows "No data".
+
+  {
+    "meta": {
+      "account_name": "string",
+      "account_id":   "string (optional)",
+      "currency":     "ISO 4217 code, e.g. USD, EUR, TRY",
+      "lang":         "en" | "tr"            (initial interface language; the TR/EN switch changes it),
+      "timezone":     "string, e.g. Europe/Istanbul",
+      "objective":    text                   (inferred business goal),
+      "period": { "start": "YYYY-MM-DD", "end": "YYYY-MM-DD", "prev_start": "YYYY-MM-DD", "prev_end": "YYYY-MM-DD" },
+      "generated_at": "YYYY-MM-DD"
+    },
+    "summary": [ text ]                      (max 5 bullets),
+    "kpis": [ {
+      "key":      "spend" | "results" | "cost_per_result" | "roas" | "ctr" | "cpm" | "frequency" | "reach" | any string,
+      "label":    text                       (used only when the key has no built-in label),
+      "current":  number | null,
+      "previous": number | null,
+      "format":   "currency" | "number" | "percent" | "ratio" | "decimal",
+      "better":   "up" | "down" | "neutral"  (cost per result and CPM: "down")
+    } ],
+    "daily": [ { "date": "YYYY-MM-DD", "spend": number, "results": number, "ctr": number, "cpm": number } ]   (current period),
+    "campaigns": [ {
+      "name": "string", "objective": text, "status": "active" | "paused" | string,
+      "spend": number, "results": number, "cost_per_result": number | null, "roas": number | null,
+      "budget": number | null              (daily budget),
+      "budget_used_pct": number | null     (spend ÷ budget available in the period × 100),
+      "note": text                         (one line),
+      "weekly": [ { "label": text, "spend": number, "cost_per_result": number | null } ]   (2–6 points, oldest first)
+    } ],
+    "breakdowns": {
+      "age" | "gender" | "placement" | "device": [ { "segment": "string", "spend": number, "results": number, "cost_per_result": number | null } ]
+    },
+    "top_ads":    [ { "name": "string", "campaign": "string", "spend": number, "cost_per_result": number | null, "reason": text } ],
+    "bottom_ads": [ same as top_ads ],
+    "recommendations": [ {
+      "priority": "high" | "medium" | "low", "title": text, "finding": text, "action": text,
+      "impact": text, "effort": "low" | "medium" | "high"
+    } ],
+    "technical_tasks": [ {
+      "title": text, "why": text, "how": [ text ], "owner": "developer" | "marketing", "priority": "high" | "medium" | "low"
+    } ],
+    "data_gaps":  [ text ],
+    "ai_context": text                     (the full 03-ai-context.md, copied by the "Copy AI context" button)
+  }
+-->
+<style>
+:root{
+  --bg:#E7E5E2; --card:#F4F3F1; --card-hi:#F8F7F5; --well:#E8E5E1; --ink:#1C1B1A; --ink-2:#3A3835;
+  --muted:#67625C; --line:#DCD8D3; --orange:#C95A0B;
+  --good:#1B6B36; --good-bg:#DCEEDF; --bad:#A3261C; --bad-bg:#F6DFDB; --neutral-bg:#E4E1DD;
+  --t0:#E0DCD7; --t1:#CFC8C0; --t2:#A9A198; --t3:#7A736B; --t4:#47433F; --t5:#1C1B1A;
+  --p-high:#1C1B1A; --p-medium:#8A837B; --p-low:#C6C0B9;
+  --radius:28px; --radius-sm:22px;
+  --shadow:0 1px 2px rgba(60,48,36,.06), 0 16px 32px -18px rgba(60,48,36,.34);
+  --shadow-sm:0 1px 2px rgba(60,48,36,.07), 0 8px 18px -12px rgba(60,48,36,.30);
+  --font:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth;-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.45 var(--font);-webkit-font-smoothing:antialiased}
+h1,h2,h3,p,ul,ol,dl,dd{margin:0}
+ul,ol{padding:0}
+button{font:inherit;color:inherit}
+a{color:inherit}
+:focus-visible{outline:2px solid var(--ink);outline-offset:2px;border-radius:12px}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+.muted{color:var(--muted)}
+.small{font-size:13px}
+
+.app{max-width:440px;margin:0 auto;padding:22px 16px 128px;display:grid;gap:18px;grid-template-columns:minmax(0,1fr)}
+@media (min-width:900px){
+  .app{max-width:1040px;grid-template-columns:repeat(2,minmax(0,1fr));gap:22px;padding:36px 28px 136px}
+  .span2{grid-column:1/-1}
+}
+
+/* cards */
+.card{background:linear-gradient(180deg,var(--card-hi),var(--card));border:1px solid rgba(255,255,255,.7);border-radius:var(--radius);box-shadow:var(--shadow);padding:20px}
+.well{background:var(--well);border-radius:20px;box-shadow:inset 0 1px 3px rgba(60,48,36,.08)}
+.sec-head{display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin:2px 4px 12px}
+.sec-head h2{font-size:21px;font-weight:600;letter-spacing:-.01em}
+.h-card{font-size:17px;font-weight:600;letter-spacing:-.01em}
+
+/* header */
+.top{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap;padding:4px 4px 0}
+.top h1{font-size:28px;font-weight:650;letter-spacing:-.025em;line-height:1.15;margin:10px 0 6px;overflow-wrap:anywhere}
+.top-l{min-width:0;flex:1 1 220px}
+.top-r{display:flex;gap:8px;align-items:center}
+.chip-ro{display:inline-flex;align-items:center;gap:6px;padding:6px 12px 6px 10px;border-radius:999px;background:var(--card);box-shadow:var(--shadow-sm);font-size:12.5px;font-weight:600}
+.chip-ro .dot{width:8px;height:8px;border-radius:50%;background:var(--good)}
+.round{width:44px;height:44px;border-radius:50%;border:1px solid rgba(255,255,255,.7);background:linear-gradient(180deg,var(--card-hi),var(--card));box-shadow:var(--shadow-sm);display:grid;place-items:center;cursor:pointer}
+.seg{display:inline-flex;padding:4px;border-radius:999px;background:var(--well);box-shadow:inset 0 1px 3px rgba(60,48,36,.1)}
+.seg button{border:0;background:transparent;min-width:44px;height:36px;border-radius:999px;font-weight:600;font-size:13px;cursor:pointer;color:var(--muted)}
+.seg button[aria-pressed="true"]{background:var(--card-hi);color:var(--ink);box-shadow:var(--shadow-sm)}
+
+/* pills / badges */
+.pill{display:inline-flex;align-items:center;justify-content:center;gap:8px;border:0;border-radius:999px;padding:11px 20px;min-height:44px;background:linear-gradient(180deg,#3A3836,#1C1B1A);color:#fff;font-weight:600;font-size:14px;cursor:pointer;box-shadow:0 8px 16px -8px rgba(28,27,26,.6),inset 0 1px 0 rgba(255,255,255,.15);text-decoration:none}
+.badge{display:inline-flex;align-items:center;gap:4px;padding:3px 9px;border-radius:999px;font-size:12.5px;font-weight:650;white-space:nowrap;background:var(--neutral-bg);color:var(--ink-2)}
+.badge.good{background:var(--good-bg);color:var(--good)}
+.badge.bad{background:var(--bad-bg);color:var(--bad)}
+.badge svg{width:9px;height:9px;fill:currentColor}
+.chip{display:inline-flex;align-items:center;padding:3px 10px;border-radius:999px;background:var(--well);font-size:12px;font-weight:600;color:var(--ink-2)}
+
+/* performance */
+.perf-head{display:flex;justify-content:space-between;gap:12px;align-items:flex-start}
+.heat-wrap{position:relative;margin-top:16px}
+.heat-wrap>svg{display:block;width:100%;height:auto}
+#overview{display:flex;flex-direction:column}
+.spark{margin-top:16px;padding:12px 14px 10px;flex:1;display:flex;flex-direction:column;min-height:120px}
+.spark-head{display:flex;justify-content:space-between;gap:8px;font-size:12px;color:var(--muted)}
+.spark-head strong{color:var(--ink);font-weight:650}
+.spark svg{display:block;width:100%;flex:1;min-height:80px;margin-top:6px}
+.float-badge{position:absolute;right:6px;top:-8px;background:var(--card-hi);border-radius:999px;padding:4px;box-shadow:var(--shadow-sm)}
+.heat-foot{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-top:8px;font-size:12px;color:var(--muted)}
+.legend{display:inline-flex;align-items:center;gap:3px}
+.legend i{width:10px;height:10px;border-radius:3px;display:inline-block}
+.perf-foot{display:flex;justify-content:space-between;align-items:flex-end;gap:12px;margin-top:auto;padding-top:18px;flex-wrap:wrap}
+.stats{display:flex;gap:18px;flex-wrap:wrap}
+.stat .v{font-size:19px;font-weight:650;letter-spacing:-.01em}
+.stat .l{font-size:12px;color:var(--muted)}
+
+/* summary */
+.bullets{list-style:none;display:grid;gap:10px;margin-top:12px}
+.bullets li{position:relative;padding-left:18px}
+.bullets li::before{content:"";position:absolute;left:2px;top:.55em;width:7px;height:7px;border-radius:50%;background:var(--ink)}
+.goal{margin-top:12px;font-size:13px}
+.ai{margin-top:18px;padding:16px;display:flex;gap:14px;align-items:center;justify-content:space-between;flex-wrap:wrap}
+.ai p{font-size:13px;max-width:34ch}
+
+/* kpis */
+.kpis{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+@media (min-width:900px){.kpis{grid-template-columns:repeat(4,minmax(0,1fr));gap:14px}}
+.kpi{background:linear-gradient(180deg,var(--card-hi),var(--card));border:1px solid rgba(255,255,255,.7);border-radius:var(--radius-sm);box-shadow:var(--shadow-sm);padding:14px 14px 12px;display:grid;gap:4px;min-width:0}
+.kpi .l{font-size:12.5px;color:var(--muted);font-weight:600}
+.kpi .v{font-size:21px;font-weight:650;letter-spacing:-.02em;overflow-wrap:anywhere}
+.kpi .p{font-size:12px;color:var(--muted)}
+.kpi .row{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+
+/* campaigns */
+.scroller{display:flex;gap:14px;overflow-x:auto;scroll-snap-type:x mandatory;padding:4px 16px 20px;margin:0 -16px;scrollbar-width:thin;scrollbar-color:var(--t2) transparent}
+@media (min-width:900px){.scroller{margin:0;padding:4px 4px 20px}}
+.camp{flex:0 0 272px;scroll-snap-align:start;scroll-margin-left:16px;padding:10px;display:flex;flex-direction:column}
+.camp .chart{padding:6px 4px 2px}
+.camp .chart svg{display:block;width:100%;height:auto}
+.camp-body{padding:12px 8px 6px;display:grid;gap:8px;flex:1}
+.camp-name{display:flex;justify-content:space-between;gap:8px;align-items:flex-start}
+.camp-name h3{font-size:15.5px;font-weight:600;line-height:1.3;overflow-wrap:anywhere}
+.camp-note{font-size:13px;color:var(--muted);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.mini{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px}
+.mini .v{font-size:13.5px;font-weight:650;overflow-wrap:anywhere}
+.mini .l{font-size:11px;color:var(--muted)}
+.chart-legend{display:flex;gap:12px;font-size:11.5px;color:var(--muted);padding:6px 6px 0}
+.chart-legend span{display:inline-flex;align-items:center;gap:5px}
+.sw-bar{width:10px;height:10px;border-radius:3px;background:repeating-linear-gradient(135deg,var(--t4) 0 2px,var(--t1) 2px 4px)}
+.sw-line{width:14px;height:3px;border-radius:2px;background:var(--orange)}
+.budget{display:grid;gap:6px;margin-top:auto;padding-top:4px}
+.budget .row{display:flex;justify-content:space-between;font-size:12px;color:var(--muted)}
+.track{height:5px;border-radius:5px;background:var(--t0);overflow:hidden}
+.track i{display:block;height:100%;background:var(--ink);border-radius:5px}
+
+/* list items (recommendations, tasks) */
+.list{display:grid;gap:12px}
+.item{position:relative;background:linear-gradient(180deg,var(--card-hi),var(--card));border:1px solid rgba(255,255,255,.7);border-radius:var(--radius-sm);box-shadow:var(--shadow-sm);padding:14px 14px 14px 26px}
+.item::before{content:"";position:absolute;left:12px;top:16px;bottom:16px;width:4px;border-radius:4px;background:var(--p-low)}
+.item.p-high::before{background:var(--p-high)}
+.item.p-medium::before{background:var(--p-medium)}
+.item-btn{display:flex;width:100%;align-items:flex-start;justify-content:space-between;gap:10px;border:0;background:transparent;text-align:left;cursor:pointer;padding:0;min-height:44px}
+.item-title{display:block;font-size:15px;font-weight:600;line-height:1.35}
+.item-sub{display:block;font-size:13px;color:var(--muted);margin-top:3px}
+.chev{flex:none;width:32px;height:32px;border-radius:50%;display:grid;place-items:center;background:var(--well);transition:transform .2s ease}
+[aria-expanded="true"] .chev,.chev[aria-expanded="true"]{transform:rotate(180deg)}
+.item-body{margin-top:12px}
+.item-body dl{display:grid;gap:10px}
+.item-body dt{font-size:12px;font-weight:650;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}
+.item-body dd{font-size:14px;margin-top:2px}
+.item-body ol{padding-left:20px;display:grid;gap:6px;font-size:14px}
+.box{background:#FFFFFF;border-radius:16px;padding:12px 14px;box-shadow:0 1px 2px rgba(60,48,36,.06)}
+
+.task-row{display:flex;align-items:flex-start;gap:12px}
+.task-row label{flex:1;font-size:15px;font-weight:600;line-height:1.35;padding-top:2px;cursor:pointer}
+.cb{appearance:none;-webkit-appearance:none;flex:none;width:24px;height:24px;margin:1px 0 0;border-radius:8px;border:2px solid var(--ink);background:var(--card-hi);cursor:pointer;display:grid;place-items:center}
+.cb:checked{background:var(--ink) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M6 12.5l4 4 8-9' fill='none' stroke='%23fff' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center/16px no-repeat}
+.task.is-done .task-row label{text-decoration:line-through;color:var(--muted)}
+.icon-btn{flex:none;width:44px;height:44px;margin:-8px -6px -8px 0;border:0;background:transparent;display:grid;place-items:center;cursor:pointer;border-radius:50%}
+.task .why{font-size:13px;color:var(--muted);margin:6px 0 0 36px}
+.task .chips{display:flex;gap:6px;flex-wrap:wrap;margin:10px 0 0 36px}
+.task .item-body{margin-left:36px}
+.progress{display:flex;align-items:center;gap:10px;font-size:13px;color:var(--muted)}
+.progress .track{width:72px}
+
+/* segments */
+.tabs{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px}
+.tab{border:0;border-radius:999px;padding:8px 14px;min-height:40px;background:var(--well);font-weight:600;font-size:13px;cursor:pointer;color:var(--ink-2)}
+.tab[aria-selected="true"]{background:var(--ink);color:#fff}
+.seg-rows{display:grid;gap:12px}
+.seg-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:4px 12px;align-items:center}
+.seg-row .name{font-size:14px;font-weight:600;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.seg-row .cpr{font-size:14px;font-weight:650;text-align:right}
+.seg-row .meta{grid-column:1/-1;display:flex;align-items:center;gap:10px;font-size:12px;color:var(--muted)}
+.seg-row .track{flex:1}
+
+/* ads */
+.ads-group+.ads-group{margin-top:18px}
+.ads-group h3{font-size:13px;font-weight:650;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;margin-bottom:8px}
+.ad{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:2px 12px;padding:10px 0;border-top:1px solid var(--line)}
+.ad:first-of-type{border-top:0}
+.ad .n{font-size:14px;font-weight:600;overflow-wrap:anywhere}
+.ad .c{font-size:14px;font-weight:650;text-align:right}
+.ad .r{grid-column:1/-1;font-size:13px;color:var(--muted)}
+
+/* notes */
+.notes{display:grid;gap:14px}
+@media (min-width:900px){.notes{grid-template-columns:1fr 1fr}}
+.notes ul{list-style:none;display:grid;gap:6px;font-size:14px}
+.notes li{padding-left:14px;position:relative}
+.notes li::before{content:"–";position:absolute;left:0;color:var(--muted)}
+.fine{font-size:12.5px;color:var(--muted);display:grid;gap:6px}
+
+/* dock */
+.dock{position:fixed;left:50%;bottom:18px;transform:translateX(-50%);display:flex;align-items:center;gap:12px;z-index:10}
+.dock-nav{display:flex;gap:4px;padding:6px;border-radius:999px;background:rgba(244,243,241,.92);-webkit-backdrop-filter:blur(12px);backdrop-filter:blur(12px);border:1px solid rgba(255,255,255,.7);box-shadow:var(--shadow)}
+.dock-nav a{width:46px;height:46px;border-radius:50%;display:grid;place-items:center;color:var(--t3)}
+.dock-nav a[aria-current="true"]{background:var(--card-hi);color:var(--ink);box-shadow:var(--shadow-sm)}
+.fab{width:58px;height:58px;border-radius:50%;border:0;display:grid;place-items:center;background:linear-gradient(180deg,#3A3836,#1C1B1A);color:#fff;cursor:pointer;box-shadow:0 12px 24px -10px rgba(28,27,26,.7),inset 0 1px 0 rgba(255,255,255,.15)}
+.toast{position:fixed;left:50%;bottom:96px;transform:translate(-50%,12px);background:var(--ink);color:#fff;padding:10px 18px;border-radius:999px;font-size:14px;font-weight:600;opacity:0;pointer-events:none;transition:opacity .2s,transform .2s;z-index:11;max-width:calc(100vw - 32px);text-align:center}
+.toast.show{opacity:1;transform:translate(-50%,0)}
+svg.i{width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+
+@media (prefers-reduced-motion:reduce){
+  html{scroll-behavior:auto}
+  *,*::before,*::after{transition:none!important;animation:none!important}
+}
+@media print{
+  @page{margin:14mm}
+  body{background:#fff;font-size:12px}
+  .dock,.toast,.no-print{display:none!important}
+  .app{max-width:none;padding:0;gap:12px;grid-template-columns:1fr 1fr}
+  .span2{grid-column:1/-1}
+  .card,.kpi,.item,.camp{box-shadow:none!important;border:1px solid #d6d2cc;background:#fff;break-inside:avoid}
+  .scroller{flex-wrap:wrap;overflow:visible;margin:0;padding:0}
+  .camp{flex:1 1 30%}
+  .item-body[hidden]{display:block!important}
+  .chev{display:none}
+  *{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+}
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+  <defs>
+    <pattern id="hatch-light" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+      <rect width="6" height="6" fill="#D9D3CC"/><rect width="2" height="6" fill="#C3BCB3"/>
+    </pattern>
+    <pattern id="hatch-dark" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+      <rect width="6" height="6" fill="#1C1B1A"/><rect width="2" height="6" fill="#3B3936"/>
+    </pattern>
+  </defs>
+</svg>
+<main class="app" id="app"></main>
+<div id="dock"></div>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<script id="report-data" type="application/json">{"meta":{"account_name":"Lumen & Clay Studio (demo)","account_id":"act_000000000000","currency":"USD","lang":"en","timezone":"America/Chicago","objective":{"en":"Online sales of handmade ceramics (purchase objective)","tr":"El yapımı seramiklerin online satışı (satın alma hedefi)"},"period":{"start":"2026-10-21","end":"2026-11-19","prev_start":"2026-09-21","prev_end":"2026-10-20"},"generated_at":"2026-11-20"},"summary":[{"en":"Spend $46,276 (+2.2%) brought 1,524 purchases at $30.36 each (+15.4%).","tr":"$46.276 harcama (+%2,2) ile satın alma başı $30,36 maliyetle 1.524 satın alma geldi (+%15,4)."},{"en":"The Lookalike campaign takes 21% of spend at $80.18 per purchase, 2.1× the ad-set median ($38.24).","tr":"Benzer kitle kampanyası harcamanın %21 kadarını alıyor; satın alma başı $80,18, ad set medyanının ($38,24) 2,1× katı."},{"en":"Creative fatigue in Lookalike: frequency 3.36 and link CTR down from 1.32% to 0.99%.","tr":"Benzer kitlede kreatif yorgunluğu: sıklık 3,36, bağlantı TO %1,32 seviyesinden %0,99 seviyesine düştü."},{"en":"Catalog ($18.23) and Retargeting ($17.09) are the winners; both are under 0.7× the median.","tr":"Katalog ($18,23) ve yeniden hedefleme ($17,09) kazanan kampanyalar; ikisi de medyanın 0,7 katının altında."},{"en":"The dataset received 1,585 browser purchase events and 0 server events: Conversions API is not set up.","tr":"Veri kümesi 1.585 tarayıcı satın alma olayı ve 0 sunucu olayı aldı: Dönüşümler API'si kurulu değil."}],"kpis":[{"key":"spend","format":"currency","better":"neutral","current":46275.79,"previous":45299},{"key":"results","format":"number","better":"up","current":1524,"previous":1722},{"key":"cost_per_result","format":"currency","better":"down","current":30.36,"previous":26.31},{"key":"roas","format":"ratio","better":"up","current":1.99,"previous":2.25},{"key":"ctr","format":"percent","better":"up","current":1.33,"previous":1.42},{"key":"cpm","format":"currency","better":"down","current":13.13,"previous":11.73},{"key":"frequency","format":"decimal","better":"down","current":2.6,"previous":2.36},{"key":"reach","format":"number","better":"up","current":1357962,"previous":1639563}],"daily":[{"date":"2026-10-21","spend":1606.63,"results":49,"ctr":1.32,"cpm":12.74},{"date":"2026-10-22","spend":1690.48,"results":53,"ctr":1.37,"cpm":13.23},{"date":"2026-10-23","spend":1589.34,"results":48,"ctr":1.28,"cpm":12.99},{"date":"2026-10-24","spend":1697.1,"results":65,"ctr":1.35,"cpm":13.05},{"date":"2026-10-25","spend":1589.66,"results":50,"ctr":1.34,"cpm":13.41},{"date":"2026-10-26","spend":1682.3,"results":52,"ctr":1.32,"cpm":13.14},{"date":"2026-10-27","spend":1674.55,"results":53,"ctr":1.3,"cpm":12.74},{"date":"2026-10-28","spend":1711.03,"results":54,"ctr":1.32,"cpm":12.83},{"date":"2026-10-29","spend":1619.92,"results":48,"ctr":1.37,"cpm":13.4},{"date":"2026-10-30","spend":1487.35,"results":48,"ctr":1.31,"cpm":13.11},{"date":"2026-10-31","spend":1457.37,"results":51,"ctr":1.37,"cpm":13.35},{"date":"2026-11-01","spend":1530.58,"results":57,"ctr":1.33,"cpm":12.83},{"date":"2026-11-02","spend":1499.12,"results":47,"ctr":1.37,"cpm":13.13},{"date":"2026-11-03","spend":1501.4,"results":48,"ctr":1.35,"cpm":13.3},{"date":"2026-11-04","spend":1454.84,"results":47,"ctr":1.34,"cpm":13.02},{"date":"2026-11-05","spend":1521.01,"results":45,"ctr":1.3,"cpm":13.47},{"date":"2026-11-06","spend":1533.73,"results":52,"ctr":1.39,"cpm":13.3},{"date":"2026-11-07","spend":1466.1,"results":54,"ctr":1.31,"cpm":13.01},{"date":"2026-11-08","spend":1536.56,"results":58,"ctr":1.31,"cpm":13.03},{"date":"2026-11-09","spend":1415.97,"results":48,"ctr":1.38,"cpm":13.17},{"date":"2026-11-10","spend":1475.17,"results":47,"ctr":1.33,"cpm":13.26},{"date":"2026-11-11","spend":1496.64,"results":51,"ctr":1.35,"cpm":13.41},{"date":"2026-11-12","spend":1559.02,"results":47,"ctr":1.34,"cpm":13.79},{"date":"2026-11-13","spend":1407.08,"results":45,"ctr":1.33,"cpm":12.77},{"date":"2026-11-14","spend":1485.22,"results":59,"ctr":1.33,"cpm":12.85},{"date":"2026-11-15","spend":1507.59,"results":54,"ctr":1.29,"cpm":12.99},{"date":"2026-11-16","spend":1543.41,"results":49,"ctr":1.33,"cpm":13.06},{"date":"2026-11-17","spend":1497.88,"results":49,"ctr":1.31,"cpm":13.24},{"date":"2026-11-18","spend":1508.91,"results":45,"ctr":1.33,"cpm":13.66},{"date":"2026-11-19","spend":1529.83,"results":51,"ctr":1.29,"cpm":12.84}],"campaigns":[{"name":"SALES | Prospecting | Broad","objective":{"en":"Sales","tr":"Satış"},"status":"active","spend":19426.82,"results":508,"cost_per_result":38.24,"roas":1.55,"budget":650,"budget_used_pct":99.62,"note":{"en":"Largest spender; cost per purchase $38.24, in line with the median","tr":"En büyük harcama; satın alma başı maliyet $38,24, medyanla uyumlu"},"weekly":[{"label":{"en":"Oct 23","tr":"23 Eki"},"spend":4583.15,"cost_per_result":39.17},{"label":{"en":"Oct 30","tr":"30 Eki"},"spend":4479.88,"cost_per_result":40.73},{"label":{"en":"Nov 6","tr":"6 Kas"},"spend":4549.62,"cost_per_result":37.91},{"label":{"en":"Nov 13","tr":"13 Kas"},"spend":4513.8,"cost_per_result":36.11}]},{"name":"SALES | Lookalike audiences","objective":{"en":"Sales","tr":"Satış"},"status":"active","spend":9942.36,"results":124,"cost_per_result":80.18,"roas":0.68,"budget":330,"budget_used_pct":100.43,"note":{"en":"Fatigue: frequency 3.36, link CTR -24.5%","tr":"Yorgunluk: sıklık 3,36, bağlantı TO -%24,5"},"weekly":[{"label":{"en":"Oct 23","tr":"23 Eki"},"spend":2293.56,"cost_per_result":73.99},{"label":{"en":"Oct 30","tr":"30 Eki"},"spend":2334.17,"cost_per_result":77.81},{"label":{"en":"Nov 6","tr":"6 Kas"},"spend":2314.01,"cost_per_result":85.7},{"label":{"en":"Nov 13","tr":"13 Kas"},"spend":2320.07,"cost_per_result":82.86}]},{"name":"SALES | Advantage+ catalog","objective":{"en":"Sales","tr":"Satış"},"status":"active","spend":8949.02,"results":491,"cost_per_result":18.23,"roas":3.36,"budget":300,"budget_used_pct":99.43,"note":{"en":"Winner: ROAS 3.36× at $18.23 per purchase","tr":"Kazanan: $18,23 satın alma başı maliyetle ROAS 3,36×"},"weekly":[{"label":{"en":"Oct 23","tr":"23 Eki"},"spend":2041.47,"cost_per_result":17.3},{"label":{"en":"Oct 30","tr":"30 Eki"},"spend":2107.29,"cost_per_result":18.32},{"label":{"en":"Nov 6","tr":"6 Kas"},"spend":2064.48,"cost_per_result":17.5},{"label":{"en":"Nov 13","tr":"13 Kas"},"spend":2139.33,"cost_per_result":19.1}]},{"name":"SALES | Retargeting | 30d visitors","objective":{"en":"Sales","tr":"Satış"},"status":"active","spend":6580.59,"results":385,"cost_per_result":17.09,"roas":3.67,"budget":220,"budget_used_pct":99.71,"note":{"en":"Winner: 0.4× the median cost per purchase","tr":"Kazanan: satın alma başı maliyet medyanın 0,4× katı"},"weekly":[{"label":{"en":"Oct 23","tr":"23 Eki"},"spend":1573.06,"cost_per_result":17.29},{"label":{"en":"Oct 30","tr":"30 Eki"},"spend":1530.31,"cost_per_result":17.39},{"label":{"en":"Nov 6","tr":"6 Kas"},"spend":1555.1,"cost_per_result":16.9},{"label":{"en":"Nov 13","tr":"13 Kas"},"spend":1506.72,"cost_per_result":17.32}]},{"name":"SALES | Holiday teaser","objective":{"en":"Sales","tr":"Satış"},"status":"paused","spend":1377,"results":16,"cost_per_result":86.06,"roas":0.65,"budget":150,"budget_used_pct":30.6,"note":{"en":"Paused on Oct 29 after 9 days","tr":"9 gün sonra 29 Eki tarihinde duraklatıldı"},"weekly":[{"label":{"en":"Oct 23","tr":"23 Eki"},"spend":1072.67,"cost_per_result":82.51},{"label":{"en":"Oct 30","tr":"30 Eki"},"spend":0,"cost_per_result":null},{"label":{"en":"Nov 6","tr":"6 Kas"},"spend":0,"cost_per_result":null},{"label":{"en":"Nov 13","tr":"13 Kas"},"spend":0,"cost_per_result":null}]}],"breakdowns":{"age":[{"segment":"18-24","spend":3702.06,"results":74,"cost_per_result":50.03},{"segment":"25-34","spend":12494.46,"results":435,"cost_per_result":28.72},{"segment":"35-44","spend":13419.98,"results":512,"cost_per_result":26.21},{"segment":"45-54","spend":9255.16,"results":322,"cost_per_result":28.74},{"segment":"55-64","spend":5090.34,"results":135,"cost_per_result":37.71},{"segment":"65+","spend":2313.79,"results":46,"cost_per_result":50.3}],"gender":[{"segment":"female","spend":29616.51,"results":1094,"cost_per_result":27.07},{"segment":"male","spend":15271.01,"results":403,"cost_per_result":37.89},{"segment":"unknown","spend":1388.27,"results":27,"cost_per_result":51.42}],"placement":[{"segment":"Facebook Feed","spend":13882.74,"results":509,"cost_per_result":27.27},{"segment":"Instagram Feed","spend":11106.19,"results":446,"cost_per_result":24.9},{"segment":"Instagram Stories","spend":6478.61,"results":215,"cost_per_result":30.13},{"segment":"Instagram Reels","spend":5553.1,"results":194,"cost_per_result":28.62},{"segment":"Audience Network","spend":7866.88,"results":115,"cost_per_result":68.41},{"segment":"Facebook Marketplace","spend":1388.27,"results":45,"cost_per_result":30.85}],"device":[{"segment":"mobile","spend":39797.18,"results":1256,"cost_per_result":31.69},{"segment":"desktop","spend":5553.1,"results":237,"cost_per_result":23.43},{"segment":"tablet","spend":925.52,"results":31,"cost_per_result":29.86}]},"top_ads":[{"name":"RT_Review_Quote","campaign":"SALES | Retargeting | 30d visitors","spend":3623.29,"cost_per_result":14.44,"reason":{"en":"Social proof headline; link CTR 1.92%","tr":"Sosyal kanıt başlığı; bağlantı TO %1,92"}},{"name":"Catalog_DPA_Lifestyle_Frame","campaign":"SALES | Advantage+ catalog","spend":3572.49,"cost_per_result":16.17,"reason":{"en":"Lifestyle frame lifts CTR to 1.69%","tr":"Yaşam tarzı çerçevesi TO'yu %1,69 seviyesine çıkarıyor"}},{"name":"Catalog_DPA_Default","campaign":"SALES | Advantage+ catalog","spend":5376.53,"cost_per_result":19.91,"reason":{"en":"Dynamic catalog; ROAS 3.09×","tr":"Dinamik katalog; ROAS 3,09×"}},{"name":"RT_FreeShipping_Reminder","campaign":"SALES | Retargeting | 30d visitors","spend":2957.3,"cost_per_result":22.07,"reason":{"en":"Clear offer to warm visitors; 134 purchases","tr":"Sıcak ziyaretçiye net teklif; 134 satın alma"}},{"name":"UGC_Mug_Unboxing_v2","campaign":"SALES | Prospecting | Broad","spend":8175.73,"cost_per_result":30.39,"reason":{"en":"Best prospecting creative; link CTR 1.48%","tr":"En iyi geniş kitle kreatifi; bağlantı TO %1,48"}}],"bottom_ads":[{"name":"LAL_Studio_Story_30s","campaign":"SALES | Lookalike audiences","spend":1979.06,"cost_per_result":123.69,"reason":{"en":"Weak hook: link CTR 0.63% on $1,979 spend","tr":"Zayıf açılış: $1.979 harcamada bağlantı TO %0,63"}},{"name":"LAL_Discount_10","campaign":"SALES | Lookalike audiences","spend":3312.61,"cost_per_result":97.43,"reason":{"en":"Lookalike fatigue; frequency 3.40","tr":"Benzer kitle yorgunluğu; sıklık 3,40"}},{"name":"LAL_Gift_Guide","campaign":"SALES | Lookalike audiences","spend":3338.34,"cost_per_result":72.57,"reason":{"en":"Lookalike fatigue; 46 purchases in 30 days","tr":"Benzer kitle yorgunluğu; 30 günde 46 satın alma"}},{"name":"Carousel_Bestsellers","campaign":"SALES | Prospecting | Broad","spend":4859.11,"cost_per_result":47.64,"reason":{"en":"Carousel converts below average ($47.64 per purchase)","tr":"Carousel ortalamanın altında dönüşüyor (satın alma başı $47,64)"}},{"name":"LAL_Glaze_Closeup","campaign":"SALES | Lookalike audiences","spend":1312.35,"cost_per_result":46.87,"reason":{"en":"Good CTR (1.52%) but the lookalike audience is fatigued","tr":"TO iyi (%1,52) ama benzer kitle yorgun"}}],"recommendations":[{"priority":"high","effort":"low","title":{"en":"Cut and consolidate the Lookalike campaign","tr":"Benzer kitle kampanyasını küçült ve birleştir"},"finding":{"en":"Cost per purchase $80.18 is 2.1× the ad-set median ($38.24) while the campaign takes 21% of spend. Its three ad sets got 11, 7, 10 purchases in the last 7 days (learning needs about 50).","tr":"Satın alma başı maliyet $80,18, ad set medyanının ($38,24) 2,1× katı; kampanya harcamanın %21 kadarını alıyor. Üç ad set son 7 günde 11, 7, 10 satın alma aldı (öğrenme için yaklaşık 50 gerekir)."},"action":{"en":"Merge the three lookalike ad sets into one (LAL 1% purchasers), lower its budget by 30% (about $99/day) and move that money to Retargeting and Catalog.","tr":"Üç benzer kitle ad set'ini tek bir ad set'te (LAL %1 satın alanlar) birleştirin, bütçeyi %30 (günde yaklaşık $99) azaltın ve bu parayı yeniden hedefleme ile kataloğa aktarın."},"impact":{"en":"Lower blended cost per purchase; one ad set gets enough conversions to leave the learning phase.","tr":"Ortalama satın alma başı maliyet düşer; tek ad set öğrenme aşamasından çıkacak kadar dönüşüm alır."}},{"priority":"high","effort":"medium","title":{"en":"Refresh Lookalike creatives","tr":"Benzer kitle kreatiflerini yenile"},"finding":{"en":"Frequency 3.36 (previous 2.56) and link CTR fell from 1.32% to 0.99% (-24.5%).","tr":"Sıklık 3,36 (önceki 2,56); bağlantı TO %1,32 seviyesinden %0,99 seviyesine düştü (-%24,5)."},"action":{"en":"Launch 3 new concepts built on the best hook (glaze close-up and unboxing) and pause the oldest ads.","tr":"En iyi açılış (sır yakın çekimi ve kutu açılışı) üzerine 3 yeni konsept yayınlayın, en eski reklamları duraklatın."},"impact":{"en":"CTR back toward the previous period level; lower CPM pressure from the same audience.","tr":"TO önceki dönem seviyesine yaklaşır; aynı kitlede CPM baskısı azalır."}},{"priority":"high","effort":"medium","title":{"en":"Set up Conversions API with deduplication","tr":"Tekilleştirmeli Dönüşümler API'sini kur"},"finding":{"en":"1,585 browser purchase events and 0 server events in the last 30 days.","tr":"Son 30 günde 1.585 tarayıcı satın alma olayı, 0 sunucu olayı."},"action":{"en":"Send Purchase from the server with the same event_id as the pixel (see technical tasks).","tr":"Purchase olayını sunucudan, pikseldeki ile aynı event_id ile gönderin (teknik yapılacaklara bakın)."},"impact":{"en":"More purchases attributed and better optimization signal, especially on iOS and with ad blockers.","tr":"Daha fazla satın alma ilişkilendirilir, optimizasyon sinyali güçlenir; özellikle iOS ve reklam engelleyicilerde."}},{"priority":"medium","effort":"low","title":{"en":"Scale Catalog and Retargeting gradually","tr":"Katalog ve yeniden hedeflemeyi kademeli büyüt"},"finding":{"en":"Catalog $18.23 (ROAS 3.36×) and Retargeting $17.09 (ROAS 3.67×) are below 0.7× the median $38.24.","tr":"Katalog $18,23 (ROAS 3,36×) ve yeniden hedefleme $17,09 (ROAS 3,67×), medyan $38,24 değerinin 0,7 katının altında."},"action":{"en":"Raise budgets by max 20% every 3 days while cost per purchase stays under $26.77.","tr":"Satın alma başı maliyet $26,77 altında kaldıkça bütçeyi 3 günde bir en fazla %20 artırın."},"impact":{"en":"More purchases at the account's best efficiency without resetting learning.","tr":"Öğrenmeyi sıfırlamadan hesabın en verimli noktasında daha fazla satın alma."}},{"priority":"medium","effort":"low","title":{"en":"Test excluding Audience Network","tr":"Audience Network'ü hariç tutmayı test et"},"finding":{"en":"Audience Network takes 17% of spend at $68.41 per purchase, 2.3× the account average.","tr":"Audience Network harcamanın %17 kadarını, satın alma başı $68,41 ile alıyor; hesap ortalamasının 2,3× katı."},"action":{"en":"Duplicate the Prospecting ad set without Audience Network and compare for 7 days.","tr":"Geniş kitle ad set'ini Audience Network olmadan çoğaltın ve 7 gün karşılaştırın."},"impact":{"en":"Budget moves to placements that convert closer to the average.","tr":"Bütçe ortalamaya yakın dönüşen yerleşimlere kayar."}},{"priority":"medium","effort":"low","title":{"en":"Rework the first 3 seconds of the studio story video","tr":"Stüdyo hikâyesi videosunun ilk 3 saniyesini yenile"},"finding":{"en":"LAL_Studio_Story_30s has a link CTR of 0.63% on $1,979 spend (account 1.33%).","tr":"LAL_Studio_Story_30s, $1.979 harcamada %0,63 bağlantı TO'ya sahip (hesap %1,33)."},"action":{"en":"Open on the finished product, put the offer in the headline and cut the video to 15 seconds.","tr":"Videoyu bitmiş ürünle açın, teklifi başlığa koyun ve süreyi 15 saniyeye indirin."},"impact":{"en":"Higher CTR from the same spend.","tr":"Aynı harcamayla daha yüksek TO."}},{"priority":"low","effort":"low","title":{"en":"Add UTM parameters to every ad","tr":"Tüm reklamlara UTM parametresi ekle"},"finding":{"en":"7 of 12 ads have no UTM parameters.","tr":"12 reklamın 7 tanesinde UTM parametresi yok."},"action":{"en":"Apply the UTM template from the technical tasks to all ads.","tr":"Teknik yapılacaklardaki UTM şablonunu tüm reklamlara uygulayın."},"impact":{"en":"Meta results can be checked against your analytics tool.","tr":"Meta sonuçları analitik aracınızla karşılaştırılabilir."}}],"technical_tasks":[{"owner":"developer","priority":"high","title":{"en":"Conversions API for Purchase with a shared event_id","tr":"Ortak event_id ile Purchase için Dönüşümler API'si"},"why":{"en":"1,585 browser purchase events, 0 server events.","tr":"1.585 tarayıcı satın alma olayı, 0 sunucu olayı."},"how":[{"en":"Generate one event_id per order (for example the order number).","tr":"Her sipariş için tek bir event_id üretin (örneğin sipariş numarası)."},{"en":"Send it with the pixel: fbq('track', 'Purchase', {...}, {eventID: id}).","tr":"Pikselde gönderin: fbq('track', 'Purchase', {...}, {eventID: id})."},{"en":"Send the same event from the server with the same event_id, value, currency and hashed customer data.","tr":"Aynı olayı sunucudan aynı event_id, değer, para birimi ve hash'lenmiş müşteri verisiyle gönderin."},{"en":"Check deduplication in Events Manager after 48 hours.","tr":"48 saat sonra Olay Yöneticisi'nde tekilleştirmeyi kontrol edin."}]},{"owner":"developer","priority":"medium","title":{"en":"Verify the domain and set Purchase as the top-priority event","tr":"Alan adını doğrula ve Purchase'ı en öncelikli olay yap"},"why":{"en":"Tracking finding: purchase signal depends on browser events only.","tr":"İzleme bulgusu: satın alma sinyali yalnızca tarayıcı olaylarına dayanıyor."},"how":[{"en":"Business settings → Brand safety → Domains: add the domain and verify it with a DNS TXT record.","tr":"İşletme ayarları → Marka güvenliği → Alan adları: alan adını ekleyin ve DNS TXT kaydıyla doğrulayın."},{"en":"Events Manager → Aggregated event measurement: put Purchase first.","tr":"Olay Yöneticisi → Toplu olay ölçümü: Purchase'ı ilk sıraya koyun."}]},{"owner":"marketing","priority":"medium","title":{"en":"Check Event Match Quality manually","tr":"Olay Eşleşme Kalitesini elle kontrol et"},"why":{"en":"Data gap: the score was not available through the tools.","tr":"Eksik veri: skor araçlar üzerinden alınamadı."},"how":[{"en":"Events Manager → your dataset → Overview → Purchase → Event match quality.","tr":"Olay Yöneticisi → veri kümeniz → Genel bakış → Purchase → Olay eşleşme kalitesi."},{"en":"If the score is below 6, add email and phone (hashed) to server events.","tr":"Skor 6'nın altındaysa sunucu olaylarına (hash'lenmiş) e-posta ve telefon ekleyin."}]},{"owner":"marketing","priority":"low","title":{"en":"Add the UTM template to all ads","tr":"UTM şablonunu tüm reklamlara ekle"},"why":{"en":"7 of 12 ads have no UTM parameters.","tr":"12 reklamın 7 tanesinde UTM parametresi yok."},"how":[{"en":"Ad → Tracking → URL parameters: utm_source=meta&utm_medium=paid_social&utm_campaign={{campaign.name}}&utm_content={{ad.name}}","tr":"Reklam → İzleme → URL parametreleri: utm_source=meta&utm_medium=paid_social&utm_campaign={{campaign.name}}&utm_content={{ad.name}}"},{"en":"Use bulk edit to apply it to all active ads at once.","tr":"Tüm aktif reklamlara tek seferde uygulamak için toplu düzenlemeyi kullanın."}]}],"data_gaps":[{"en":"Event match quality was not available through the tools.","tr":"Olay eşleşme kalitesi araçlar üzerinden alınamadı."},{"en":"Video metrics (3-second views, hold rate) were not fetched; the weak-hook finding uses link CTR only.","tr":"Video metrikleri (3 saniyelik izlenme, izlenme oranı) alınmadı; zayıf açılış bulgusu yalnızca bağlantı TO'ya dayanıyor."},{"en":"Reach is deduplicated per ad set; the account total is an estimate supplied by the API.","tr":"Erişim ad set bazında tekilleştirilmiştir; hesap toplamı API'nin verdiği tahmindir."}],"ai_context":"Give this to an AI assistant and ask for new creative ideas or a budget plan.\n\n# AI context pack: Lumen & Clay Studio (demo)\n\n> **Fictional demo.** The account, campaigns, ads and numbers below are made up to show what meta-ads-audit produces.\n\n## Business and goal\nFictional online store selling handmade ceramics (mugs, bowls, vases). Goal: online sales, optimized for the Purchase event. Average order value about $60.28. Currency USD.\n\n## Period\nOct 21 – Nov 19, 2026 vs Sep 21 – Oct 20, 2026.\n\n## KPIs\n| Metric | Previous 30 days | Last 30 days | Change |\n|---|---:|---:|---:|\n| Spend | $45,299 | $46,276 | +2.2% |\n| Purchases | 1,722 | 1,524 | -11.5% |\n| Cost per purchase | $26.31 | $30.36 | +15.4% |\n| ROAS | 2.25× | 1.99× | -11.6% |\n| Link CTR | 1.42% | 1.33% | -6.3% |\n| CPM | $11.73 | $13.13 | +11.9% |\n| Frequency | 2.36 | 2.60 | +10.2% |\n| Reach | 1,639,563 | 1,357,962 | -17.2% |\n\n## Structure\n- 5 campaigns, 7 ad sets, 12 ads. Daily budgets total $1,500/day (active).\n- SALES | Prospecting | Broad (active): $19,427 spend, 508 purchases, $38.24 per purchase, ROAS 1.55×.\n- SALES | Lookalike audiences (active): $9,942 spend, 124 purchases, $80.18 per purchase, ROAS 0.68×.\n- SALES | Advantage+ catalog (active): $8,949 spend, 491 purchases, $18.23 per purchase, ROAS 3.36×.\n- SALES | Retargeting | 30d visitors (active): $6,581 spend, 385 purchases, $17.09 per purchase, ROAS 3.67×.\n- SALES | Holiday teaser (paused): $1,377 spend, 16 purchases, $86.06 per purchase, ROAS 0.65×.\n\n## Top 5 issues\n1. Cut and consolidate the Lookalike campaign: Cost per purchase $80.18 is 2.1× the ad-set median ($38.24) while the campaign takes 21% of spend. Its three ad sets got 11, 7, 10 purchases in the last 7 days (learning needs about 50).\n2. Refresh Lookalike creatives: Frequency 3.36 (previous 2.56) and link CTR fell from 1.32% to 0.99% (-24.5%).\n3. Set up Conversions API with deduplication: 1,585 browser purchase events and 0 server events in the last 30 days.\n4. Scale Catalog and Retargeting gradually: Catalog $18.23 (ROAS 3.36×) and Retargeting $17.09 (ROAS 3.67×) are below 0.7× the median $38.24.\n5. Test excluding Audience Network: Audience Network takes 17% of spend at $68.41 per purchase, 2.3× the account average.\n\n## Best creatives (copy)\n- **RT_Review_Quote** (Image). Headline: \"The glaze is even nicer in person\". Primary text: \"Still thinking about it? Here is what 2,000+ customers say about their pieces.\"\n- **RT_FreeShipping_Reminder** (Image). Headline: \"Free shipping over $50\". Primary text: \"Your basket is waiting. Free shipping on orders over $50 this week.\"\n- **UGC_Mug_Unboxing_v2** (Video). Headline: \"Handmade mugs, unboxed\". Primary text: \"Every mug is thrown, glazed and fired in our studio. Watch one arrive and see why customers keep coming back.\"\n\n## Open questions\n- Is there a target cost per purchase or ROAS? This audit compares against the account's own median.\n- What is the gross margin per order? Prospecting runs at ROAS 1.55× and Lookalike at 0.68×; are those profitable?\n- Is the holiday collection launching this year, and on which date?\n"}</script>
+<script>
+(function () {
+  'use strict';
+
+  /* ---------- interface strings ---------- */
+  var I18N = {
+    en: {
+      readOnly: 'Read-only audit', vsPrev: 'vs', perfTitle: 'Daily results', perfSub: 'Last {n} days · darker = more results',
+      checkNow: 'See actions', results: 'Results', cpr: 'Cost/result', spend: 'Spend', roas: 'ROAS',
+      less: 'Less', more: 'More', summary: 'Summary', goal: 'Goal', aiTitle: 'AI context pack',
+      aiDesc: 'Paste it into any AI assistant and ask for new creative ideas or a budget plan.',
+      copyAi: 'Copy AI context', copied: 'AI context copied', copyFailed: 'Copy failed. Use 03-ai-context.md instead.',
+      kpis: 'Key metrics', prevShort: 'Prev.', campaigns: 'Campaigns', swipe: 'Swipe for more',
+      legendSpend: 'Spend / week', legendCpr: 'Cost per result', budgetUsed: 'Budget used', budgetNA: 'Budget: no data',
+      recommendations: 'Recommendations', high: 'High', medium: 'Medium', low: 'Low', priority: 'priority', effort: 'Effort',
+      finding: 'Finding', action: 'Action', impact: 'Expected impact', tasks: 'Technical tasks', done: 'done',
+      owner_developer: 'Developer', owner_marketing: 'Marketing', steps: 'Show steps', why: 'Why', notSaved: 'Checkmarks are not saved.',
+      segments: 'Segments', age: 'Age', gender: 'Gender', placement: 'Placement', device: 'Device', outlier: 'Outlier',
+      ofSpend: 'of spend', avg: 'avg', ads: 'Ads', topAds: 'Top ads', bottomAds: 'Bottom ads',
+      notes: 'Data & notes', dataGaps: 'Data gaps', noGaps: 'No gaps recorded.',
+      heuristics: 'Thresholds are generic heuristics compared with this account’s own baseline, not industry facts.',
+      notAffiliated: 'Not affiliated with, endorsed or sponsored by Meta Platforms, Inc.',
+      privacy: 'Generated locally by meta-ads-audit. Your data stays between Meta and your own Claude.',
+      generated: 'Generated', noData: 'No data', print: 'Print or save as PDF', language: 'Interface language',
+      nav: 'Sections', navOverview: 'Overview', navCampaigns: 'Campaigns', navRecs: 'Recommendations', navTasks: 'Technical tasks',
+      better: 'better', worse: 'worse', change: 'change vs previous period',
+      status_active: 'Active', status_paused: 'Paused',
+      emptyTitle: 'Report template', emptyBody: 'No report data yet. Ask Claude to “Audit my Meta ad account” and it will fill this page.',
+      kpi_spend: 'Spend', kpi_results: 'Results', kpi_cost_per_result: 'Cost per result', kpi_roas: 'ROAS', kpi_ctr: 'Link CTR',
+      kpi_cpm: 'CPM', kpi_frequency: 'Frequency', kpi_reach: 'Reach', kpi_impressions: 'Impressions', kpi_cpc: 'CPC',
+      kpi_link_clicks: 'Link clicks', kpi_purchase_value: 'Purchase value',
+      seg_female: 'Female', seg_male: 'Male', seg_unknown: 'Unknown', seg_mobile: 'Mobile', seg_desktop: 'Desktop', seg_tablet: 'Tablet',
+      heatAria: 'Daily results heat map', campScroller: 'Campaign cards', weekly: 'Weekly spend', sparkTitle: 'Daily cost per result'
+    },
+    tr: {
+      readOnly: 'Salt okunur denetim', vsPrev: 'karşı', perfTitle: 'Günlük sonuçlar', perfSub: 'Son {n} gün · koyu = daha çok sonuç',
+      checkNow: 'Aksiyonlara bak', results: 'Sonuç', cpr: 'Sonuç başı', spend: 'Harcama', roas: 'ROAS',
+      less: 'Az', more: 'Çok', summary: 'Özet', goal: 'Hedef', aiTitle: 'Yapay zekâ bağlam paketi',
+      aiDesc: 'Herhangi bir yapay zekâ asistanına yapıştırın; yeni kreatif fikirleri ya da bütçe planı isteyin.',
+      copyAi: 'Bağlamı kopyala', copied: 'Bağlam kopyalandı', copyFailed: 'Kopyalanamadı. 03-ai-context.md dosyasını kullanın.',
+      kpis: 'Temel metrikler', prevShort: 'Önceki', campaigns: 'Kampanyalar', swipe: 'Kaydırarak gezin',
+      legendSpend: 'Haftalık harcama', legendCpr: 'Sonuç başı maliyet', budgetUsed: 'Bütçe kullanımı', budgetNA: 'Bütçe: veri yok',
+      recommendations: 'Öneriler', high: 'Yüksek', medium: 'Orta', low: 'Düşük', priority: 'öncelik', effort: 'Efor',
+      finding: 'Bulgu', action: 'Aksiyon', impact: 'Beklenen etki', tasks: 'Teknik yapılacaklar', done: 'tamam',
+      owner_developer: 'Geliştirici', owner_marketing: 'Pazarlama', steps: 'Adımları göster', why: 'Neden', notSaved: 'İşaretler kaydedilmez.',
+      segments: 'Kırılımlar', age: 'Yaş', gender: 'Cinsiyet', placement: 'Yerleşim', device: 'Cihaz', outlier: 'Aykırı',
+      ofSpend: 'harcama payı', avg: 'ort.', ads: 'Reklamlar', topAds: 'En iyi reklamlar', bottomAds: 'En zayıf reklamlar',
+      notes: 'Veri ve notlar', dataGaps: 'Eksik veriler', noGaps: 'Eksik veri kaydedilmedi.',
+      heuristics: 'Eşikler sektör gerçeği değildir; bu hesabın kendi ortalamasıyla karşılaştırılan genel sezgisel kurallardır.',
+      notAffiliated: 'Meta Platforms, Inc. ile bağlantılı değildir; Meta tarafından onaylanmamış veya desteklenmemiştir.',
+      privacy: 'meta-ads-audit ile yerelde üretildi. Verileriniz Meta ile kendi Claude’unuz arasında kalır.',
+      generated: 'Oluşturulma', noData: 'Veri yok', print: 'Yazdır veya PDF olarak kaydet', language: 'Arayüz dili',
+      nav: 'Bölümler', navOverview: 'Genel bakış', navCampaigns: 'Kampanyalar', navRecs: 'Öneriler', navTasks: 'Teknik yapılacaklar',
+      better: 'iyi yönde', worse: 'kötü yönde', change: 'önceki döneme göre değişim',
+      status_active: 'Aktif', status_paused: 'Duraklatıldı',
+      emptyTitle: 'Rapor şablonu', emptyBody: 'Henüz rapor verisi yok. Claude’a “Meta reklam hesabımı denetle” deyin, bu sayfayı doldursun.',
+      kpi_spend: 'Harcama', kpi_results: 'Sonuç', kpi_cost_per_result: 'Sonuç başı maliyet', kpi_roas: 'ROAS', kpi_ctr: 'Bağlantı TO',
+      kpi_cpm: 'CPM', kpi_frequency: 'Sıklık', kpi_reach: 'Erişim', kpi_impressions: 'Gösterim', kpi_cpc: 'TBM',
+      kpi_link_clicks: 'Bağlantı tıklaması', kpi_purchase_value: 'Satın alma değeri',
+      seg_female: 'Kadın', seg_male: 'Erkek', seg_unknown: 'Bilinmiyor', seg_mobile: 'Mobil', seg_desktop: 'Masaüstü', seg_tablet: 'Tablet',
+      heatAria: 'Günlük sonuç ısı haritası', campScroller: 'Kampanya kartları', weekly: 'Haftalık harcama', sparkTitle: 'Günlük sonuç başı maliyet'
+    }
+  };
+
+  /* ---------- data ---------- */
+  var DATA = null;
+  try {
+    var raw = document.getElementById('report-data').textContent.trim();
+    if (raw && raw !== '__REPORT' + '_DATA__') DATA = JSON.parse(raw);
+  } catch (e) { console.error('report-data could not be parsed', e); }
+
+  var state = { lang: 'en', openRecs: {}, openTasks: {}, done: {}, seg: null };
+  var initial = (DATA && DATA.meta && DATA.meta.lang) || navigator.language || 'en';
+  state.lang = String(initial).toLowerCase().indexOf('tr') === 0 ? 'tr' : 'en';
+
+  /* ---------- helpers ---------- */
+  function t(k) { var d = I18N[state.lang]; return (d && d[k] != null) ? d[k] : (I18N.en[k] != null ? I18N.en[k] : k); }
+  function tx(v) {
+    if (v == null) return '';
+    if (typeof v === 'object' && !Array.isArray(v)) {
+      if (v[state.lang] != null) return String(v[state.lang]);
+      if (v.en != null) return String(v.en);
+      for (var k in v) if (v[k] != null) return String(v[k]);
+      return '';
+    }
+    return String(v);
+  }
+  function arr(v) { return Array.isArray(v) ? v : []; }
+  function num(v) { return typeof v === 'number' && isFinite(v); }
+  function loc() { return state.lang === 'tr' ? 'tr-TR' : 'en-US'; }
+  function cur() { return (DATA && DATA.meta && DATA.meta.currency) || 'USD'; }
+
+  function fmt(v, kind, compact) {
+    if (!num(v)) return t('noData');
+    try {
+      if (kind === 'currency') {
+        var big = Math.abs(v) >= 1000;
+        var o = { style: 'currency', currency: cur(), maximumFractionDigits: big ? 0 : 2, minimumFractionDigits: big ? 0 : 2 };
+        if (compact) { o.notation = 'compact'; o.maximumFractionDigits = 1; o.minimumFractionDigits = 0; }
+        return new Intl.NumberFormat(loc(), o).format(v);
+      }
+      if (kind === 'percent') return new Intl.NumberFormat(loc(), { style: 'percent', minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(v / 100);
+      if (kind === 'ratio') return new Intl.NumberFormat(loc(), { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(v) + '×';
+      if (kind === 'decimal') return new Intl.NumberFormat(loc(), { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(v);
+      return new Intl.NumberFormat(loc(), { maximumFractionDigits: 0, notation: compact ? 'compact' : 'standard' }).format(v);
+    } catch (e) {
+      return (Math.round(v * 100) / 100) + (kind === 'currency' ? ' ' + cur() : '');
+    }
+  }
+  function change(c, p) { return (num(c) && num(p) && p !== 0) ? (c - p) / Math.abs(p) : null; }
+  function fmtChange(c) {
+    return new Intl.NumberFormat(loc(), { style: 'percent', maximumFractionDigits: 1, minimumFractionDigits: 1, signDisplay: 'exceptZero' }).format(c);
+  }
+  function parseDate(s) {
+    var m = /^(\d{4})-(\d{2})-(\d{2})/.exec(s || '');
+    return m ? new Date(Date.UTC(+m[1], +m[2] - 1, +m[3])) : null;
+  }
+  function fmtDate(s, withYear) {
+    var d = parseDate(s); if (!d) return s || '';
+    var o = { day: 'numeric', month: 'short', timeZone: 'UTC' }; if (withYear) o.year = 'numeric';
+    return new Intl.DateTimeFormat(loc(), o).format(d);
+  }
+  function range(a, b) { return (a && b) ? fmtDate(a) + ' – ' + fmtDate(b, true) : t('noData'); }
+
+  function h(tag, attrs) {
+    var el = document.createElement(tag);
+    attrs = attrs || {};
+    for (var k in attrs) {
+      var v = attrs[k];
+      if (v == null || v === false) continue;
+      if (k === 'class') el.className = v;
+      else if (k === 'text') el.textContent = v;
+      else if (k.slice(0, 2) === 'on') el.addEventListener(k.slice(2), v);
+      else el.setAttribute(k, v === true ? '' : v);
+    }
+    for (var i = 2; i < arguments.length; i++) add(el, arguments[i]);
+    return el;
+  }
+  function add(el, c) {
+    if (c == null || c === false) return;
+    if (Array.isArray(c)) { c.forEach(function (x) { add(el, x); }); return; }
+    el.appendChild(c.nodeType ? c : document.createTextNode(String(c)));
+  }
+  var NS = 'http://www.w3.org/2000/svg';
+  function s(tag, attrs) {
+    var el = document.createElementNS(NS, tag);
+    for (var k in (attrs || {})) if (attrs[k] != null) el.setAttribute(k, attrs[k]);
+    for (var i = 2; i < arguments.length; i++) {
+      var c = arguments[i]; if (c == null) continue;
+      if (Array.isArray(c)) c.forEach(function (x) { if (x) el.appendChild(x); });
+      else el.appendChild(c.nodeType ? c : document.createTextNode(String(c)));
+    }
+    return el;
+  }
+  var ICONS = {
+    home: 'M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6h-6v6H4a1 1 0 0 1-1-1z',
+    chart: 'M5 20V11M12 20V5M19 20v-6M3 20h18',
+    bulb: 'M9 18h6M10 21h4M12 3a6 6 0 0 0-3.5 10.9c.6.5 1 1.2 1 2.1h5c0-.9.4-1.6 1-2.1A6 6 0 0 0 12 3z',
+    check: 'M4 4h16v16H4zM8 12l3 3 5-6',
+    copy: 'M9 9h11v12H9zM5 15H4V3h12v1',
+    print: 'M7 9V3h10v6M6 18H4v-8h16v8h-2M7 14h10v7H7z',
+    chev: 'M6 9l6 6 6-6'
+  };
+  function icon(name, size) {
+    var el = s('svg', { 'class': 'i', viewBox: '0 0 24 24', 'aria-hidden': 'true', focusable: 'false' }, s('path', { d: ICONS[name] }));
+    if (size) { el.style.width = size + 'px'; el.style.height = size + 'px'; }
+    return el;
+  }
+  function badge(c, better) {
+    if (c == null) return h('span', { 'class': 'badge' }, t('noData'));
+    var cls = 'badge';
+    var verdict = '';
+    if (better !== 'neutral' && c !== 0) {
+      var good = (c > 0) === (better === 'up');
+      cls += good ? ' good' : ' bad';
+      verdict = good ? t('better') : t('worse');
+    }
+    var tri = c === 0 ? null : s('svg', { viewBox: '0 0 10 10', 'aria-hidden': 'true' },
+      s('path', { d: c > 0 ? 'M5 1 9.5 9h-9z' : 'M5 9 .5 1h9z' }));
+    return h('span', { 'class': cls }, tri, fmtChange(c), verdict ? h('span', { 'class': 'sr' }, ', ' + verdict) : null);
+  }
+  function sec(id, title, extra, cls) {
+    return h('section', { id: id, 'class': cls || '', 'aria-labelledby': id + '-h' },
+      h('div', { 'class': 'sec-head' }, h('h2', { id: id + '-h' }, title), extra || null));
+  }
+  function kpi(key) { var k = arr(DATA.kpis).filter(function (x) { return x && x.key === key; })[0]; return k || null; }
+
+  var toastTimer;
+  function toast(msg) {
+    var el = document.getElementById('toast');
+    el.textContent = msg; el.classList.add('show');
+    clearTimeout(toastTimer); toastTimer = setTimeout(function () { el.classList.remove('show'); }, 2200);
+  }
+  function copyContext() {
+    var text = tx(DATA && DATA.ai_context);
+    if (!text) { toast(t('copyFailed')); return; }
+    function fallback() {
+      var ta = document.createElement('textarea');
+      ta.value = text; ta.setAttribute('readonly', ''); ta.style.position = 'fixed'; ta.style.opacity = '0';
+      document.body.appendChild(ta); ta.select();
+      var ok = false; try { ok = document.execCommand('copy'); } catch (e) { ok = false; }
+      ta.remove(); toast(ok ? t('copied') : t('copyFailed'));
+    }
+    if (navigator.clipboard && window.isSecureContext) {
+      navigator.clipboard.writeText(text).then(function () { toast(t('copied')); }, fallback);
+    } else fallback();
+  }
+
+  /* ---------- sections ---------- */
+  function header() {
+    var m = DATA.meta || {}; var p = m.period || {};
+    var langBtns = ['en', 'tr'].map(function (l) {
+      return h('button', { type: 'button', 'aria-pressed': String(state.lang === l), lang: l,
+        onclick: function () { if (state.lang !== l) { state.lang = l; render(); } } }, l.toUpperCase());
+    });
+    return h('header', { 'class': 'top span2' },
+      h('div', { 'class': 'top-l' },
+        h('span', { 'class': 'chip-ro' }, h('span', { 'class': 'dot', 'aria-hidden': 'true' }), t('readOnly')),
+        h('h1', null, m.account_name || t('noData')),
+        h('p', { 'class': 'muted small' }, range(p.start, p.end), ' · ', t('vsPrev'), ' ', range(p.prev_start, p.prev_end))
+      ),
+      h('div', { 'class': 'top-r no-print' },
+        h('div', { 'class': 'seg', role: 'group', 'aria-label': t('language') }, langBtns),
+        h('button', { type: 'button', 'class': 'round', 'aria-label': t('print'), title: t('print'), onclick: function () { window.print(); } }, icon('print'))
+      )
+    );
+  }
+
+  function heatmap(daily) {
+    var vals = daily.map(function (d) { return num(d.results) ? d.results : null; });
+    var sorted = vals.filter(function (v) { return v != null && v > 0; }).sort(function (a, b) { return a - b; });
+    function level(v) {
+      if (v == null || v <= 0 || !sorted.length) return 0;
+      var below = 0; for (var i = 0; i < sorted.length; i++) if (sorted[i] < v) below++;
+      return Math.min(5, 1 + Math.floor(below / sorted.length * 5));
+    }
+    var tones = ['var(--t0)', 'var(--t1)', 'var(--t2)', 'var(--t3)', 'var(--t4)', 'var(--t5)'];
+    var cell = 10, gap = 3, rows = 5, n = daily.length;
+    var W = n * (cell + gap) - gap, H = rows * (cell + gap) - gap;
+    var cols = daily.map(function (d, i) {
+      var lv = level(vals[i]);
+      var rects = [];
+      for (var r = 0; r < rows; r++) {
+        var filled = (rows - r) <= lv;
+        rects.push(s('rect', { x: i * (cell + gap), y: r * (cell + gap), width: cell, height: cell, rx: 2.5, fill: filled ? tones[lv] : tones[0] }));
+      }
+      return s('g', null, s('title', null, fmtDate(d.date, true) + ': ' + fmt(vals[i], 'number') + ' ' + t('results').toLowerCase()), rects);
+    });
+    return s('svg', { viewBox: '0 0 ' + W + ' ' + H, role: 'img', 'aria-label': t('heatAria') }, cols);
+  }
+
+  function cprLine(daily) {
+    var v = daily.map(function (d) { return (num(d.spend) && num(d.results) && d.results > 0) ? d.spend / d.results : null; });
+    var ok = v.filter(function (x) { return x != null; });
+    if (ok.length < 2) return null;
+    var W = 300, H = 64, n = v.length;
+    var lo = Math.min.apply(null, ok), hi = Math.max.apply(null, ok), span = (hi - lo) || 1;
+    var X = function (i) { return 5 + i * (W - 10) / Math.max(1, n - 1); };
+    var Y = function (x) { return H - 6 - (x - lo) / span * (H - 14); };
+    var d = '', pen = false, lastI = -1;
+    v.forEach(function (x, i) {
+      if (x == null) { pen = false; return; }
+      d += (pen ? 'L' : 'M') + X(i).toFixed(1) + ' ' + Y(x).toFixed(1) + ' '; pen = true; lastI = i;
+    });
+    var avg = ok.reduce(function (a, b) { return a + b; }, 0) / ok.length;
+    var svg = s('svg', { viewBox: '0 0 ' + W + ' ' + H, preserveAspectRatio: 'none', role: 'img',
+      'aria-label': t('sparkTitle') + ': ' + fmt(lo, 'currency') + ' – ' + fmt(hi, 'currency') },
+      s('line', { x1: 0, x2: W, y1: Y(avg).toFixed(1), y2: Y(avg).toFixed(1), stroke: '#A9A198', 'stroke-width': 1, 'stroke-dasharray': '3 4', 'vector-effect': 'non-scaling-stroke' }),
+      s('path', { d: d, fill: 'none', stroke: 'var(--orange)', 'stroke-width': 2.2, 'stroke-linejoin': 'round', 'stroke-linecap': 'round', 'vector-effect': 'non-scaling-stroke' }));
+    return h('div', { 'class': 'well spark' },
+      h('div', { 'class': 'spark-head' }, h('span', null, t('sparkTitle')),
+        h('span', null, t('avg') + ' ', h('strong', null, fmt(avg, 'currency')))), svg);
+  }
+
+  function perf() {
+    var daily = arr(DATA.daily);
+    var r = kpi('results'), c = kpi('cost_per_result'), sp = kpi('spend');
+    var resultsCur = r ? r.current : daily.reduce(function (a, d) { return a + (num(d.results) ? d.results : 0); }, 0);
+    var el = h('section', { id: 'overview', 'class': 'card', 'aria-labelledby': 'overview-h' },
+      h('div', { 'class': 'perf-head' },
+        h('div', null, h('h2', { 'class': 'h-card', id: 'overview-h' }, t('perfTitle')),
+          h('p', { 'class': 'muted small' }, t('perfSub').replace('{n}', daily.length)))
+      )
+    );
+    if (daily.length) {
+      el.appendChild(h('div', { 'class': 'heat-wrap' }, heatmap(daily),
+        r ? h('span', { 'class': 'float-badge', title: t('change') }, badge(change(r.current, r.previous), 'up')) : null));
+      var tones = ['--t1', '--t2', '--t3', '--t4', '--t5'].map(function (v) { return h('i', { style: 'background:var(' + v + ')' }); });
+      el.appendChild(h('div', { 'class': 'heat-foot' },
+        h('span', null, fmtDate(daily[0].date)),
+        h('span', { 'class': 'legend', 'aria-hidden': 'true' }, t('less'), ' ', tones, ' ', t('more')),
+        h('span', null, fmtDate(daily[daily.length - 1].date))));
+      var sp2 = cprLine(daily);
+      if (sp2) el.appendChild(sp2);
+    } else {
+      el.appendChild(h('p', { 'class': 'well', style: 'padding:24px;margin-top:14px;text-align:center' }, t('noData')));
+    }
+    el.appendChild(h('div', { 'class': 'perf-foot' },
+      h('div', { 'class': 'stats' },
+        h('div', { 'class': 'stat' }, h('div', { 'class': 'v' }, fmt(resultsCur, 'number')), h('div', { 'class': 'l' }, t('results'))),
+        h('div', { 'class': 'stat' }, h('div', { 'class': 'v' }, fmt(c && c.current, 'currency')), h('div', { 'class': 'l' }, t('cpr'))),
+        h('div', { 'class': 'stat' }, h('div', { 'class': 'v' }, fmt(sp && sp.current, 'currency')), h('div', { 'class': 'l' }, t('spend')))
+      ),
+      h('a', { 'class': 'pill no-print', href: '#recommendations' }, t('checkNow'))
+    ));
+    return el;
+  }
+
+  function summary() {
+    var items = arr(DATA.summary);
+    return h('section', { 'class': 'card', 'aria-labelledby': 'summary-h' },
+      h('h2', { 'class': 'h-card', id: 'summary-h' }, t('summary')),
+      items.length ? h('ul', { 'class': 'bullets' }, items.slice(0, 5).map(function (x) { return h('li', null, tx(x)); }))
+        : h('p', { 'class': 'muted', style: 'margin-top:10px' }, t('noData')),
+      DATA.meta && DATA.meta.objective ? h('p', { 'class': 'goal muted' }, h('strong', null, t('goal') + ': '), tx(DATA.meta.objective)) : null,
+      h('div', { 'class': 'ai well no-print' },
+        h('div', null, h('strong', null, t('aiTitle')), h('p', { 'class': 'muted' }, t('aiDesc'))),
+        h('button', { type: 'button', 'class': 'pill', onclick: copyContext }, icon('copy', 18), t('copyAi')))
+    );
+  }
+
+  function kpis() {
+    var list = arr(DATA.kpis);
+    var el = sec('kpis', t('kpis'), null, 'span2');
+    el.appendChild(h('div', { 'class': 'kpis' }, list.map(function (k) {
+      var label = I18N.en['kpi_' + k.key] ? t('kpi_' + k.key) : (tx(k.label) || k.key);
+      return h('div', { 'class': 'kpi' },
+        h('div', { 'class': 'l' }, label),
+        h('div', { 'class': 'v' }, fmt(k.current, k.format)),
+        h('div', { 'class': 'row' }, badge(change(k.current, k.previous), k.better || 'neutral'),
+          h('span', { 'class': 'p' }, t('prevShort') + ' ' + fmt(k.previous, k.format)))
+      );
+    })));
+    return el;
+  }
+
+  function campChart(c) {
+    var weeks = arr(c.weekly);
+    if (!weeks.length) return h('div', { 'class': 'well chart' }, h('p', { 'class': 'muted small', style: 'padding:40px 0;text-align:center' }, t('noData')));
+    var W = 248, base = 112, top = 24, n = weeks.length, pad = 14;
+    var slot = (W - pad * 2) / n, bw = Math.min(36, slot * 0.62);
+    var maxS = Math.max.apply(null, weeks.map(function (w) { return num(w.spend) ? w.spend : 0; })) || 1;
+    var nodes = [], centers = [];
+    weeks.forEach(function (w, i) {
+      var x = pad + slot * i + (slot - bw) / 2, sp = num(w.spend) ? w.spend : 0;
+      var bh = Math.max(4, sp / maxS * (base - top));
+      centers.push(x + bw / 2);
+      nodes.push(s('rect', { x: x, y: base - bh, width: bw, height: bh, rx: 9, fill: i === n - 1 ? 'url(#hatch-dark)' : 'url(#hatch-light)' }));
+      nodes.push(s('text', { x: x + bw / 2, y: base - bh - 6, 'text-anchor': 'middle', 'font-size': 10.5, 'font-weight': 600, fill: '#3A3835' }, fmt(w.spend, 'currency', true)));
+      nodes.push(s('text', { x: x + bw / 2, y: base + 15, 'text-anchor': 'middle', 'font-size': 10, fill: '#67625C' }, tx(w.label)));
+    });
+    var cv = weeks.map(function (w) { return num(w.cost_per_result) ? w.cost_per_result : null; });
+    var ok = cv.filter(function (v) { return v != null; });
+    if (ok.length >= 2) {
+      var lo = Math.min.apply(null, ok), hi = Math.max.apply(null, ok), span = (hi - lo) || 1;
+      var y = function (v) { return (base - 18) - (v - lo) / span * (base - top - 36); };
+      var pts = [], first = null, last = null;
+      cv.forEach(function (v, i) { if (v != null) { pts.push([centers[i], y(v)]); if (!first) first = pts[0]; last = pts[pts.length - 1]; } });
+      var d = 'M6 ' + first[1] + ' ' + pts.map(function (p) { return 'L' + p[0].toFixed(1) + ' ' + p[1].toFixed(1); }).join(' ') + ' L' + (W - 6) + ' ' + last[1];
+      nodes.push(s('path', { d: d, fill: 'none', stroke: 'var(--orange)', 'stroke-width': 2.2, 'stroke-linejoin': 'round', 'stroke-linecap': 'round' }));
+      nodes.push(s('circle', { cx: 6, cy: first[1], r: 4.5, fill: 'var(--orange)' }));
+      nodes.push(s('circle', { cx: W - 6, cy: last[1], r: 4.5, fill: 'var(--orange)' }));
+    }
+    var aria = t('weekly') + ': ' + weeks.map(function (w) { return tx(w.label) + ' ' + fmt(w.spend, 'currency'); }).join(', ') +
+      '. ' + t('legendCpr') + ': ' + weeks.map(function (w) { return fmt(w.cost_per_result, 'currency'); }).join(', ');
+    return h('div', { 'class': 'well chart' },
+      s('svg', { viewBox: '0 0 ' + W + ' 132', role: 'img', 'aria-label': aria }, nodes));
+  }
+
+  function campaigns() {
+    var list = arr(DATA.campaigns).slice().sort(function (a, b) { return (b.spend || 0) - (a.spend || 0); });
+    var el = sec('campaigns', t('campaigns'), h('span', { 'class': 'muted small no-print' }, list.length > 1 ? t('swipe') + ' →' : ''), 'span2');
+    if (!list.length) { el.appendChild(h('p', { 'class': 'card muted' }, t('noData'))); return el; }
+    el.appendChild(h('div', { 'class': 'scroller', tabindex: '0', role: 'region', 'aria-label': t('campScroller') }, list.map(function (c) {
+      var st = String(c.status || '').toLowerCase();
+      var pct = num(c.budget_used_pct) ? c.budget_used_pct : null;
+      return h('article', { 'class': 'card camp' },
+        campChart(c),
+        h('div', { 'class': 'chart-legend', 'aria-hidden': 'true' },
+          h('span', null, h('i', { 'class': 'sw-bar' }), t('legendSpend')), h('span', null, h('i', { 'class': 'sw-line' }), t('legendCpr'))),
+        h('div', { 'class': 'camp-body' },
+          h('div', { 'class': 'camp-name' }, h('h3', null, c.name || t('noData')),
+            st ? h('span', { 'class': 'chip' }, I18N.en['status_' + st] ? t('status_' + st) : c.status) : null),
+          (c.note || c.objective) ? h('p', { 'class': 'camp-note' }, [tx(c.objective), tx(c.note)].filter(Boolean).join(' · ')) : null,
+          h('div', { 'class': 'mini' },
+            h('div', null, h('div', { 'class': 'v' }, fmt(c.spend, 'currency', true)), h('div', { 'class': 'l' }, t('spend'))),
+            h('div', null, h('div', { 'class': 'v' }, fmt(c.results, 'number')), h('div', { 'class': 'l' }, t('results'))),
+            h('div', null, h('div', { 'class': 'v' }, fmt(c.cost_per_result, 'currency')), h('div', { 'class': 'l' }, t('cpr'))),
+            h('div', null, h('div', { 'class': 'v' }, fmt(c.roas, 'ratio')), h('div', { 'class': 'l' }, t('roas')))),
+          h('div', { 'class': 'budget' },
+            h('div', { 'class': 'row' }, h('span', null, pct == null ? t('budgetNA') : t('budgetUsed')), h('span', null, pct == null ? '' : fmt(pct, 'number') + '%')),
+            h('div', { 'class': 'track', role: 'presentation' }, h('i', { style: 'width:' + Math.min(100, pct || 0) + '%' })))
+        )
+      );
+    })));
+    return el;
+  }
+
+  var PRIO = { high: 0, medium: 1, low: 2 };
+  function prioOf(x) { var p = String(x || '').toLowerCase(); return PRIO[p] != null ? p : 'low'; }
+
+  function recommendations() {
+    var list = arr(DATA.recommendations).map(function (r, i) { return { r: r, i: i }; })
+      .sort(function (a, b) { return PRIO[prioOf(a.r.priority)] - PRIO[prioOf(b.r.priority)] || a.i - b.i; });
+    var el = sec('recommendations', t('recommendations'), h('span', { 'class': 'muted small' }, String(list.length)));
+    if (!list.length) { el.appendChild(h('p', { 'class': 'card muted' }, t('noData'))); return el; }
+    el.appendChild(h('div', { 'class': 'list' }, list.map(function (o) {
+      var r = o.r, id = 'rec-' + o.i, open = !!state.openRecs[o.i], p = prioOf(r.priority);
+      var body = h('div', { 'class': 'item-body', id: id }, h('dl', { 'class': 'box' },
+        h('div', null, h('dt', null, t('finding')), h('dd', null, tx(r.finding) || t('noData'))),
+        h('div', null, h('dt', null, t('action')), h('dd', null, tx(r.action) || t('noData'))),
+        h('div', null, h('dt', null, t('impact')), h('dd', null, tx(r.impact) || t('noData')))));
+      if (!open) body.hidden = true;
+      var effort = String(r.effort || '').toLowerCase();
+      return h('article', { 'class': 'item p-' + p },
+        h('h3', { style: 'font-size:inherit' }, h('button', { type: 'button', 'class': 'item-btn', 'aria-expanded': String(open), 'aria-controls': id,
+          onclick: function (e) {
+            var b = e.currentTarget, nowOpen = b.getAttribute('aria-expanded') !== 'true';
+            b.setAttribute('aria-expanded', String(nowOpen)); body.hidden = !nowOpen; state.openRecs[o.i] = nowOpen;
+          } },
+          h('span', null, h('span', { 'class': 'item-title' }, tx(r.title)),
+            h('span', { 'class': 'item-sub' }, t(p) + ' ' + t('priority') + (effort ? ' · ' + t('effort') + ': ' + t(effort).toLowerCase() : ''))),
+          h('span', { 'class': 'chev' }, icon('chev', 18)))),
+        body);
+    })));
+    return el;
+  }
+
+  function tasks() {
+    var list = arr(DATA.technical_tasks);
+    var countDone = function () { return list.filter(function (_, i) { return state.done[i]; }).length; };
+    var progTxt = h('span', null), progBar = h('i', null);
+    function upd() {
+      var d = countDone();
+      progTxt.textContent = d + '/' + list.length + ' ' + t('done');
+      progBar.style.width = (list.length ? d / list.length * 100 : 0) + '%';
+    }
+    var el = sec('tasks', t('tasks'), h('span', { 'class': 'progress', 'aria-live': 'polite' }, progTxt, h('span', { 'class': 'track', 'aria-hidden': 'true' }, progBar)));
+    upd();
+    if (!list.length) { el.appendChild(h('p', { 'class': 'card muted' }, t('noData'))); return el; }
+    el.appendChild(h('div', { 'class': 'list' }, list.map(function (k, i) {
+      var id = 'task-' + i, bid = 'task-steps-' + i, open = !!state.openTasks[i], p = prioOf(k.priority);
+      var art;
+      var steps = h('div', { 'class': 'item-body', id: bid }, h('ol', { 'class': 'box', style: 'padding-left:32px' }, arr(k.how).map(function (x) { return h('li', null, tx(x)); })));
+      if (!open) steps.hidden = true;
+      var cb = h('input', { type: 'checkbox', 'class': 'cb', id: id, onchange: function (e) {
+        state.done[i] = e.target.checked; art.classList.toggle('is-done', e.target.checked); upd();
+      } });
+      cb.checked = !!state.done[i];
+      var owner = String(k.owner || '').toLowerCase();
+      art = h('article', { 'class': 'item task p-' + p + (state.done[i] ? ' is-done' : '') },
+        h('div', { 'class': 'task-row' }, cb, h('label', { 'for': id }, tx(k.title)),
+          arr(k.how).length ? h('button', { type: 'button', 'class': 'icon-btn no-print', 'aria-expanded': String(open), 'aria-controls': bid, 'aria-label': t('steps'), title: t('steps'),
+            onclick: function (e) {
+              var b = e.currentTarget, nowOpen = b.getAttribute('aria-expanded') !== 'true';
+              b.setAttribute('aria-expanded', String(nowOpen)); steps.hidden = !nowOpen; state.openTasks[i] = nowOpen;
+            } }, h('span', { 'class': 'chev' }, icon('chev', 18))) : null),
+        k.why ? h('p', { 'class': 'why' }, h('strong', null, t('why') + ': '), tx(k.why)) : null,
+        h('div', { 'class': 'chips' },
+          owner ? h('span', { 'class': 'chip' }, I18N.en['owner_' + owner] ? t('owner_' + owner) : k.owner) : null,
+          h('span', { 'class': 'chip' }, t(p) + ' ' + t('priority'))),
+        steps);
+      return art;
+    })));
+    el.appendChild(h('p', { 'class': 'muted small no-print', style: 'margin:10px 4px 0' }, t('notSaved')));
+    return el;
+  }
+
+  function segments() {
+    var b = DATA.breakdowns || {};
+    var keys = ['age', 'gender', 'placement', 'device'].filter(function (k) { return arr(b[k]).length; });
+    var el = sec('segments', t('segments'));
+    if (!keys.length) { el.appendChild(h('p', { 'class': 'card muted' }, t('noData'))); return el; }
+    if (keys.indexOf(state.seg) < 0) state.seg = keys[0];
+    var card = h('div', { 'class': 'card' });
+    var tabs = h('div', { 'class': 'tabs no-print', role: 'tablist', 'aria-label': t('segments') }, keys.map(function (k) {
+      return h('button', { type: 'button', role: 'tab', 'class': 'tab', id: 'tab-' + k, 'aria-selected': String(state.seg === k), 'aria-controls': 'seg-panel',
+        tabindex: state.seg === k ? '0' : '-1',
+        onclick: function () { state.seg = k; draw(); },
+        onkeydown: function (e) {
+          var i = keys.indexOf(state.seg);
+          if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
+            e.preventDefault(); state.seg = keys[(i + (e.key === 'ArrowRight' ? 1 : keys.length - 1)) % keys.length]; draw();
+            document.getElementById('tab-' + state.seg).focus();
+          }
+        } }, t(k));
+    }));
+    var panel = h('div', { 'class': 'seg-rows', role: 'tabpanel', id: 'seg-panel' });
+    function draw() {
+      Array.prototype.forEach.call(tabs.children, function (btn) {
+        var on = btn.id === 'tab-' + state.seg; btn.setAttribute('aria-selected', String(on)); btn.tabIndex = on ? 0 : -1;
+      });
+      panel.setAttribute('aria-labelledby', 'tab-' + state.seg);
+      panel.textContent = '';
+      var rows = arr(b[state.seg]);
+      var tS = rows.reduce(function (a, r) { return a + (num(r.spend) ? r.spend : 0); }, 0);
+      var tR = rows.reduce(function (a, r) { return a + (num(r.results) ? r.results : 0); }, 0);
+      var avg = tR ? tS / tR : null;
+      rows.slice().sort(function (x, y) { return (y.spend || 0) - (x.spend || 0); }).forEach(function (r) {
+        var share = tS ? (r.spend || 0) / tS : 0;
+        var cpr = num(r.cost_per_result) ? r.cost_per_result : (num(r.results) && r.results ? r.spend / r.results : null);
+        var mult = (avg && cpr) ? cpr / avg : null;
+        var out = mult != null && mult >= 2 && share >= 0.15;
+        var segKey = 'seg_' + String(r.segment || '').toLowerCase();
+        panel.appendChild(h('div', { 'class': 'seg-row' },
+          h('div', { 'class': 'name' }, I18N.en[segKey] ? t(segKey) : (r.segment || '—'),
+            out ? h('span', { 'class': 'badge bad' }, t('outlier') + ' · ' + fmt(mult, 'ratio') + ' ' + t('avg')) : null),
+          h('div', { 'class': 'cpr' }, fmt(cpr, 'currency')),
+          h('div', { 'class': 'meta' }, h('span', { 'class': 'track', 'aria-hidden': 'true' }, h('i', { style: 'width:' + (share * 100).toFixed(1) + '%' })),
+            h('span', null, fmt(share * 100, 'percent') + ' ' + t('ofSpend')))));
+      });
+    }
+    draw();
+    card.appendChild(tabs); card.appendChild(panel);
+    el.appendChild(card);
+    return el;
+  }
+
+  function ads() {
+    var top = arr(DATA.top_ads), bottom = arr(DATA.bottom_ads);
+    var el = sec('ads', t('ads'));
+    function group(title, list) {
+      if (!list.length) return null;
+      return h('div', { 'class': 'ads-group' }, h('h3', null, title), list.map(function (a) {
+        return h('div', { 'class': 'ad' },
+          h('div', null, h('div', { 'class': 'n' }, a.name || '—'), h('div', { 'class': 'muted small' }, a.campaign || '')),
+          h('div', { 'class': 'c' }, fmt(a.cost_per_result, 'currency'), h('div', { 'class': 'muted small', style: 'font-weight:400' }, t('cpr'))),
+          a.reason ? h('div', { 'class': 'r' }, tx(a.reason)) : null);
+      }));
+    }
+    el.appendChild(h('div', { 'class': 'card' }, (top.length || bottom.length) ? [group(t('topAds'), top), group(t('bottomAds'), bottom)] : h('p', { 'class': 'muted' }, t('noData'))));
+    return el;
+  }
+
+  function notes() {
+    var gaps = arr(DATA.data_gaps), m = DATA.meta || {};
+    return h('section', { 'class': 'card span2', 'aria-labelledby': 'notes-h' },
+      h('h2', { 'class': 'h-card', id: 'notes-h', style: 'margin-bottom:12px' }, t('notes')),
+      h('div', { 'class': 'notes' },
+        h('div', null, h('h3', { 'class': 'small', style: 'margin-bottom:6px' }, t('dataGaps')),
+          gaps.length ? h('ul', null, gaps.map(function (g) { return h('li', null, tx(g)); })) : h('p', { 'class': 'muted small' }, t('noGaps'))),
+        h('div', { 'class': 'fine' },
+          h('p', null, t('heuristics')),
+          h('p', null, t('privacy')),
+          h('p', null, t('notAffiliated')),
+          h('p', null, [t('generated') + ': ' + (m.generated_at ? fmtDate(m.generated_at, true) : t('noData')), m.currency, m.timezone].filter(Boolean).join(' · ')))
+      )
+    );
+  }
+
+  function dock() {
+    var links = [['overview', 'home', 'navOverview'], ['campaigns', 'chart', 'navCampaigns'], ['recommendations', 'bulb', 'navRecs'], ['tasks', 'check', 'navTasks']];
+    var nav = h('nav', { 'class': 'dock-nav', 'aria-label': t('nav') }, links.map(function (l) {
+      return h('a', { href: '#' + l[0], 'data-target': l[0], 'aria-label': t(l[2]), title: t(l[2]) }, icon(l[1]));
+    }));
+    return h('div', { 'class': 'dock' }, nav,
+      h('button', { type: 'button', 'class': 'fab', 'aria-label': t('copyAi'), title: t('copyAi'), onclick: copyContext }, icon('copy', 24)));
+  }
+
+  function markActive() {
+    var ids = ['overview', 'campaigns', 'recommendations', 'tasks'], current = ids[0];
+    ids.forEach(function (id) { var el = document.getElementById(id); if (el && el.getBoundingClientRect().top < window.innerHeight * 0.45) current = id; });
+    if (window.innerHeight + window.scrollY >= document.body.scrollHeight - 4) current = 'tasks';
+    Array.prototype.forEach.call(document.querySelectorAll('.dock-nav a'), function (a) {
+      if (a.getAttribute('data-target') === current) a.setAttribute('aria-current', 'true'); else a.removeAttribute('aria-current');
+    });
+  }
+
+  function empty() {
+    return h('section', { 'class': 'card span2', style: 'margin-top:40px' },
+      h('span', { 'class': 'chip-ro' }, h('span', { 'class': 'dot', 'aria-hidden': 'true' }), t('readOnly')),
+      h('h1', { style: 'font-size:24px;margin:14px 0 8px' }, t('emptyTitle')),
+      h('p', { 'class': 'muted' }, t('emptyBody')));
+  }
+
+  function render() {
+    document.documentElement.lang = state.lang;
+    var app = document.getElementById('app');
+    app.textContent = '';
+    var d = document.getElementById('dock'); d.textContent = '';
+    if (!DATA) { app.appendChild(empty()); return; }
+    document.title = (DATA.meta && DATA.meta.account_name ? DATA.meta.account_name + ' · ' : '') + t('readOnly');
+    [header(), perf(), summary(), kpis(), campaigns(), recommendations(), tasks(), segments(), ads(), notes()].forEach(function (x) { app.appendChild(x); });
+    d.appendChild(dock());
+    markActive();
+  }
+
+  var ticking = false;
+  window.addEventListener('scroll', function () {
+    if (!ticking) { ticking = true; requestAnimationFrame(function () { ticking = false; if (DATA) markActive(); }); }
+  }, { passive: true });
+  render();
+})();
+</script>
+</body>
+</html>

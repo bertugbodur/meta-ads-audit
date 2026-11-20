@@ -1,0 +1,7 @@
+{
+  "name": "meta-ads-audit",
+  "version": "0.1.0",
+  "description": "Read-only audit of your Meta (Facebook/Instagram) ad account: report, prioritized recommendations, an AI context pack, technical tasks and a visual HTML report.",
+  "license": "MIT",
+  "keywords": ["meta-ads", "facebook-ads", "instagram-ads", "audit", "marketing"]
+}

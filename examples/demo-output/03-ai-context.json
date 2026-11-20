@@ -1,0 +1,168 @@
+{
+  "usage": "Give this to an AI assistant and ask for new creative ideas or a budget plan.",
+  "note": "Fictional demo data.",
+  "meta": {
+    "account_name": "Lumen & Clay Studio (demo)",
+    "currency": "USD",
+    "timezone": "America/Chicago",
+    "period": {
+      "start": "2026-10-21",
+      "end": "2026-11-19",
+      "prev_start": "2026-09-21",
+      "prev_end": "2026-10-20"
+    }
+  },
+  "goal": "Online sales of handmade ceramics (purchase objective)",
+  "kpis": [
+    {
+      "key": "spend",
+      "format": "currency",
+      "better": "neutral",
+      "current": 46275.79,
+      "previous": 45299
+    },
+    {
+      "key": "results",
+      "format": "number",
+      "better": "up",
+      "current": 1524,
+      "previous": 1722
+    },
+    {
+      "key": "cost_per_result",
+      "format": "currency",
+      "better": "down",
+      "current": 30.36,
+      "previous": 26.31
+    },
+    {
+      "key": "roas",
+      "format": "ratio",
+      "better": "up",
+      "current": 1.99,
+      "previous": 2.25
+    },
+    {
+      "key": "ctr",
+      "format": "percent",
+      "better": "up",
+      "current": 1.33,
+      "previous": 1.42
+    },
+    {
+      "key": "cpm",
+      "format": "currency",
+      "better": "down",
+      "current": 13.13,
+      "previous": 11.73
+    },
+    {
+      "key": "frequency",
+      "format": "decimal",
+      "better": "down",
+      "current": 2.6,
+      "previous": 2.36
+    },
+    {
+      "key": "reach",
+      "format": "number",
+      "better": "up",
+      "current": 1357962,
+      "previous": 1639563
+    }
+  ],
+  "structure": [
+    {
+      "campaign": "SALES | Prospecting | Broad",
+      "status": "active",
+      "daily_budget": 650,
+      "spend": 19426.82,
+      "purchases": 508,
+      "cost_per_purchase": 38.24,
+      "roas": 1.55
+    },
+    {
+      "campaign": "SALES | Retargeting | 30d visitors",
+      "status": "active",
+      "daily_budget": 220,
+      "spend": 6580.59,
+      "purchases": 385,
+      "cost_per_purchase": 17.09,
+      "roas": 3.67
+    },
+    {
+      "campaign": "SALES | Lookalike audiences",
+      "status": "active",
+      "daily_budget": 330,
+      "spend": 9942.36,
+      "purchases": 124,
+      "cost_per_purchase": 80.18,
+      "roas": 0.68
+    },
+    {
+      "campaign": "SALES | Advantage+ catalog",
+      "status": "active",
+      "daily_budget": 300,
+      "spend": 8949.02,
+      "purchases": 491,
+      "cost_per_purchase": 18.23,
+      "roas": 3.36
+    },
+    {
+      "campaign": "SALES | Holiday teaser",
+      "status": "paused",
+      "daily_budget": 150,
+      "spend": 1377,
+      "purchases": 16,
+      "cost_per_purchase": 86.06,
+      "roas": 0.65
+    }
+  ],
+  "top_issues": [
+    {
+      "title": "Cut and consolidate the Lookalike campaign",
+      "finding": "Cost per purchase $80.18 is 2.1× the ad-set median ($38.24) while the campaign takes 21% of spend. Its three ad sets got 11, 7, 10 purchases in the last 7 days (learning needs about 50)."
+    },
+    {
+      "title": "Refresh Lookalike creatives",
+      "finding": "Frequency 3.36 (previous 2.56) and link CTR fell from 1.32% to 0.99% (-24.5%)."
+    },
+    {
+      "title": "Set up Conversions API with deduplication",
+      "finding": "1,585 browser purchase events and 0 server events in the last 30 days."
+    },
+    {
+      "title": "Scale Catalog and Retargeting gradually",
+      "finding": "Catalog $18.23 (ROAS 3.36×) and Retargeting $17.09 (ROAS 3.67×) are below 0.7× the median $38.24."
+    },
+    {
+      "title": "Test excluding Audience Network",
+      "finding": "Audience Network takes 17% of spend at $68.41 per purchase, 2.3× the account average."
+    }
+  ],
+  "best_creatives": [
+    {
+      "name": "RT_Review_Quote",
+      "format": "Image",
+      "headline": "The glaze is even nicer in person",
+      "primary_text": "Still thinking about it? Here is what 2,000+ customers say about their pieces."
+    },
+    {
+      "name": "RT_FreeShipping_Reminder",
+      "format": "Image",
+      "headline": "Free shipping over $50",
+      "primary_text": "Your basket is waiting. Free shipping on orders over $50 this week."
+    },
+    {
+      "name": "UGC_Mug_Unboxing_v2",
+      "format": "Video",
+      "headline": "Handmade mugs, unboxed",
+      "primary_text": "Every mug is thrown, glazed and fired in our studio. Watch one arrive and see why customers keep coming back."
+    }
+  ],
+  "open_questions": [
+    "Is there a target cost per purchase or ROAS? This audit compares against the account's own median.",
+    "What is the gross margin per order? Prospecting runs at ROAS 1.55× and Lookalike at 0.68×; are those profitable?",
+    "Is the holiday collection launching this year, and on which date?"
+  ]
+}
