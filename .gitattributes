@@ -1,0 +1,3 @@
+# Count JSON and Markdown in GitHub's language stats
+*.json linguist-detectable=true
+*.md linguist-detectable=true
